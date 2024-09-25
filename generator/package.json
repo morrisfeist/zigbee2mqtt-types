@@ -1,0 +1,23 @@
+{
+  "name": "generator",
+  "version": "1.0.0",
+  "description": "Generate haskell type definitions for devices supported by zigbee2mqtt",
+  "author": "Tom Morris Feist",
+  "license": "MIT",
+  "main": "generate.js",
+  "scripts": {
+    "start": "node generate.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/morrisfeist/zigbee2mqtt.git"
+  },
+  "bugs": {
+    "url": "https://github.com/morrisfeist/zigbee2mqtt/issues"
+  },
+  "homepage": "https://github.com/morrisfeist/zigbee2mqtt",
+  "dependencies": {
+    "uri-js": "^4.4.1",
+    "zigbee-herdsman-converters": "20.12.1"
+  }
+}
