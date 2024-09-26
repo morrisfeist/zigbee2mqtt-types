@@ -18,6 +18,7 @@
   "homepage": "https://github.com/morrisfeist/zigbee2mqtt",
   "dependencies": {
     "uri-js": "^4.4.1",
+    "yaml": "2.5.1",
     "zigbee-herdsman-converters": "20.12.1"
   }
 }
