@@ -1,0 +1,20 @@
+name: "zigbee2mqtt-types"
+version: "0.0.1"
+category: "Library, IoT"
+synopsis: "Haskell type definitions for devices supported by zigbee2mqtt"
+description: "Haskell type definitions for devices supported by zigbee2mqtt"
+license: "MIT"
+author: "Tom Morris Feist"
+maintainer: "morris@feist.eu"
+github: "morrisfeist/zigbee2mqtt-types"
+
+ghc-options: -Wall
+
+dependencies:
+  - base >= 4.18
+
+library:
+  source-dirs:
+    - src
+  exposed-modules:
+    - MyLib

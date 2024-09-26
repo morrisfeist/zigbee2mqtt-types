@@ -1,4 +1,6 @@
 {
+  description = "Haskell type definitions for devices supported by zigbee2mqtt";
+
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
   };
