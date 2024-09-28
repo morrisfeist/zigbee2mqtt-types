@@ -31,7 +31,7 @@ function parseArguments(): Config {
   return { outputPath, packageYamlPath };
 }
 
-type BinaryProp = { type: "binary", name: string };
+type BinaryProp = { type: "binary", name: string, value_on: string | boolean, value_off: string | boolean, value_toggle?: string };
 type EnumProp = { type: "enum", name: string, values: string[] };
 type NumericProp = { type: "numeric", name: string };
 type TextProp = { type: "text", name: string };
@@ -50,17 +50,31 @@ function propToConstructorName(prop: GenericProp) {
   return toConstructorOrTypeName(prop.name);
 }
 
+function createEnum(type: string, hsFile: HsFile, ...constructors: string[]) {
+  hsFile.content.push({
+    type: "verbatim",
+    content: `data ${toConstructorOrTypeName(type)} = ${constructors.map((str) =>
+      `${toConstructorOrTypeName(type)}${toConstructorOrTypeName(str)}`
+    ).join(" | ")}`
+  });
+}
+
+function binaryPropToType(prop: BinaryProp, hsFile: HsFile): string {
+  if (prop.value_on === true && prop.value_off === false && prop.value_toggle === undefined) {
+    return "Bool";
+  } else {
+    const props = [prop.value_on.toString(), prop.value_off.toString(), ...(prop.value_toggle ? [prop.value_toggle] : [])];
+    createEnum(prop.name, hsFile, ...props);
+    return toConstructorOrTypeName(prop.name);
+  }
+}
+
 function propToType(prop: GenericProp, hsFile: HsFile): string {
   switch (prop.type) {
     case "binary":
-      return "Bool";
+      return binaryPropToType(prop, hsFile);
     case "enum":
-      hsFile.content.push({
-        type: "verbatim",
-        content: `data ${toConstructorOrTypeName(prop.name)} = ${prop.values
-          .map(toConstructorOrTypeName)
-          .join(" | ")}`,
-      });
+      createEnum(prop.name, hsFile, ...prop.values);
       return toConstructorOrTypeName(prop.name);
     case "numeric":
       return "Int";
