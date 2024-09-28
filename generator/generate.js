@@ -41,8 +41,88 @@ function writeDefinitionFiles({ outputPath }) {
 
     const definitionPath = `${outputPath}/definitions/${vendor}/${model}.json`;
     fs.mkdirSync(path.dirname(definitionPath), { recursive: true });
-    fs.writeFileSync(definitionPath, JSON.stringify(definition, null, 4));
+    fs.writeFileSync(definitionPath, JSON.stringify(definition, null, 2));
   }
+}
+
+function toConstructorOrTypeName(str) {
+  return str
+    .replace(/[^a-zA-Z0-9]/g, " ") // Replace non alphanumeric chars with spaces
+    .replace(/\s(.)/g, (letter) => letter.toUpperCase()) // Capitalize start of each word
+    .replace(/\s/g, "") // Remove spaces
+    .replace(/^(.)/, (letter) => letter.toUpperCase()); // Capitalize first letter
+}
+
+function propToConstructorName(prop, hsFile) {
+  return toConstructorOrTypeName(prop.name);
+}
+
+function propToType(prop, hsFile) {
+  switch (prop.type) {
+    case "binary":
+      return "Bool";
+    case "enum":
+      hsFile.content.push({
+        type: "verbatim",
+        content: `data ${toConstructorOrTypeName(prop.name)} = ${prop.values
+          .map(toConstructorOrTypeName)
+          .join(" | ")}`,
+      });
+      return toConstructorOrTypeName(prop.name);
+    case "numeric":
+      return "Int";
+    case "text":
+      hsFile.imports.push("import qualified Data.Text as T");
+      return "T.Text";
+    case "composite":
+      return toConstructorOrTypeName(prop.name);
+  }
+}
+
+function getExposedProps(list) {
+  const todo = list.constructor === Array ? [...list] : [];
+  const props = [];
+
+  const specificTypes = ["light", "switch", "fan", "cover", "lock", "climate"];
+
+  while (todo.length !== 0) {
+    const prop = todo.shift();
+    if (specificTypes.includes(prop.type)) {
+      todo.unshift(...prop.features);
+    } else {
+      props.push(prop);
+    }
+  }
+
+  return props;
+}
+
+function renderHsFile({ pragmas, moduleName, imports, content }) {
+  const buildGadt = (gadt) =>
+    [
+      `data ${gadt.name} a where`,
+      ...gadt.constructors.map((c) => `  ${c.name} :: ${gadt.name} ${c.type}`),
+    ].join("\n");
+  const buildContent = (c) => {
+    switch (c.type) {
+      case "gadt":
+        return buildGadt(c);
+      case "verbatim":
+        return c.content;
+      default:
+        console.error("Unknown content type:", c.type);
+        process.exit(1);
+    }
+  };
+  return [
+    ...pragmas,
+    "",
+    `module ${moduleName} where`,
+    "",
+    ...imports,
+    "",
+    content.map(buildContent).join("\n\n"),
+  ].join("\n");
 }
 
 function writeDeviceFiles({ outputPath }) {
@@ -60,9 +140,27 @@ function writeDeviceFiles({ outputPath }) {
     const definitionPath = `${outputPath}/src/Zigbee2MQTT/Devices/${vendor}_${model}.hs`;
     const module = `Zigbee2MQTT.Devices.${vendor}_${model}`;
     exposedModules.splice(0, 0, module);
-    const fileContent = [`module ${module} where`].join("\n");
+
+    props = getExposedProps(definition.exposes);
+
+    hsFile = {
+      pragmas: [`{-# LANGUAGE GADTs #-}`],
+      moduleName: module,
+      imports: [],
+      content: [],
+    };
+
+    hsFile.content.push({
+      type: "gadt",
+      name: "Prop",
+      constructors: props.map((prop) => ({
+        name: propToConstructorName(prop, hsFile),
+        type: propToType(prop, hsFile),
+      })),
+    });
+
     fs.mkdirSync(path.dirname(definitionPath), { recursive: true });
-    fs.writeFileSync(definitionPath, fileContent);
+    fs.writeFileSync(definitionPath, renderHsFile(hsFile));
   }
 
   return exposedModules;
