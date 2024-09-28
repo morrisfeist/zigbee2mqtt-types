@@ -25,8 +25,7 @@
             pname = "zigbee2mqtt-types-source";
             version = "0.0.1";
             src = ./generator;
-            npmDepsHash = "sha256-B4I8JFMXkk7Se3Kup9kc5z+EBylP5qdCTQlaT62vn7Q=";
-            dontNpmBuild = true;
+            npmDepsHash = "sha256-XFECsHO2pfjxGLv+iAluKCRwIFRFZovqmuB5tJ3V3z4=";
             installPhase = ''
               mkdir -p $out
               npm start -- $out ${packageYaml}
