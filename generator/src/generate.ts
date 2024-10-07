@@ -31,13 +31,14 @@ function parseArguments(): Config {
   return { outputPath, packageYamlPath };
 }
 
-type BinaryProp = { type: "binary", name: string, value_on: string | boolean, value_off: string | boolean, value_toggle?: string };
-type EnumProp = { type: "enum", name: string, values: string[] };
-type NumericProp = { type: "numeric", name: string };
-type TextProp = { type: "text", name: string };
-type CompositeProp = { type: "composite", name: string };
+type BinaryProp = { type: "binary", name: string, property: string, value_on: string | boolean, value_off: string | boolean, value_toggle?: string };
+type CompositeProp = { type: "composite", name: string, property: string, features: GenericProp[] };
+type EnumProp = { type: "enum", name: string, property: string, values: string[] };
+type ListProp = { type: "list", name: string, property: string, item_type: GenericProp}
+type NumericProp = { type: "numeric", name: string, property: string };
+type TextProp = { type: "text", name: string, property: string };
 
-type GenericProp = BinaryProp | CompositeProp | EnumProp | NumericProp | TextProp
+type GenericProp = BinaryProp | CompositeProp | EnumProp | ListProp | NumericProp | TextProp
 
 type SpecificProp = {
   type: "light" | "switch" | "fan" | "cover" | "lock" | "climate",
@@ -47,43 +48,57 @@ type SpecificProp = {
 type Prop = GenericProp | SpecificProp
 
 function propToConstructorName(prop: GenericProp) {
-  return toConstructorOrTypeName(prop.name);
+  return toConstructorOrTypeName(prop.property);
 }
 
-function createEnum(type: string, hsFile: HsFile, ...constructors: string[]) {
-  hsFile.content.push({
-    type: "verbatim",
-    content: `data ${toConstructorOrTypeName(type)} = ${constructors.map((str) =>
-      `${toConstructorOrTypeName(type)}${toConstructorOrTypeName(str)}`
-    ).join(" | ")}`
+function propsToType(hsFile: HsFile, prefix: string, ...props: [GenericProp, ...GenericProp[]]): string {
+  const typeName = toConstructorOrTypeName(prefix + " " + (props[0].property || props[0].name));
+
+  const constructors: Constructor[] = [];
+  props.forEach(prop => {
+    switch (prop.type) {
+      case "binary":
+        const isTrueAndFalse =
+          (prop.value_off === false && prop.value_on === true) ||
+          (prop.value_off === true && prop.value_on === false);
+        if (isTrueAndFalse && prop.value_toggle === undefined) {
+          constructors.push({ name: prop.name, fields: [ "Bool" ]});
+        } else {
+          const values = [prop.value_on, prop.value_off, ...(prop.value_toggle ? [prop.value_toggle] : [])];
+          values.forEach(val => constructors.push({ name: val.toString(), fields: [ ]}));
+        }
+        break;
+      case "composite":
+        const fields = prop.features.map((p) => propsToType(hsFile, prefix + " " + (prop.property || prop.name), p));
+        constructors.push({ name: prop.name, fields});
+        break;
+      case "enum":
+        prop.values.forEach((str) => constructors.push({ name: str, fields: [] }));
+        break;
+      case "list":
+        constructors.push({ name: prop.name, fields: [ `[${propsToType(hsFile, prefix + " " + (prop.property || prop.name), prop.item_type)}]` ]});
+        break;
+      case "numeric":
+        constructors.push({ name: prop.name, fields: [ "Int" ]});
+        break;
+      case "text":
+        hsFile.imports.push("import qualified Data.Text as T");
+        constructors.push({ name: prop.name, fields: [ "T.Text" ]});
+        break;
+    }
   });
-}
 
-function binaryPropToType(prop: BinaryProp, hsFile: HsFile): string {
-  if (prop.value_on === true && prop.value_off === false && prop.value_toggle === undefined) {
-    return "Bool";
-  } else {
-    const props = [prop.value_on.toString(), prop.value_off.toString(), ...(prop.value_toggle ? [prop.value_toggle] : [])];
-    createEnum(prop.name, hsFile, ...props);
-    return toConstructorOrTypeName(prop.name);
+  if (constructors.length === 1 && constructors[0]?.fields?.length === 1 && constructors[0]?.fields[0] !== undefined) {
+    return constructors[0]?.fields[0];
   }
-}
 
-function propToType(prop: GenericProp, hsFile: HsFile): string {
-  switch (prop.type) {
-    case "binary":
-      return binaryPropToType(prop, hsFile);
-    case "enum":
-      createEnum(prop.name, hsFile, ...prop.values);
-      return toConstructorOrTypeName(prop.name);
-    case "numeric":
-      return "Int";
-    case "text":
-      hsFile.imports.push("import qualified Data.Text as T");
-      return "T.Text";
-    case "composite":
-      return toConstructorOrTypeName(prop.name);
-  }
+  hsFile.content.push({
+    type: "datatype",
+    name: typeName,
+    constructors: constructors.map((c) => ({ ...c, name: prefix + " " + (props[0].property || props[0].name) + " " + c.name }))
+  });
+
+  return typeName;
 }
 
 function getExposedProps(list: Prop[]): GenericProp[] {
@@ -113,6 +128,7 @@ function writeDeviceFiles(config: Config): string[] {
   const sanitizeStr = (str: string) =>
     str
       .replace(/[^a-zA-Z0-9]+/g, "_")
+      .replace(/^\s*(.)/, (letter) => letter.toUpperCase()) // Capitalize first letter
       .replace(/^_+/, "")
       .replace(/_+$/, "");
   const exposedModules: string[] = [];
@@ -125,8 +141,6 @@ function writeDeviceFiles(config: Config): string[] {
     const module = `Zigbee2MQTT.Devices.${vendor}_${model}`;
     exposedModules.splice(0, 0, module);
 
-    const props: GenericProp[] = getExposedProps(definition.exposes);
-
     const hsFile: HsFile = {
       pragmas: [`{-# LANGUAGE GADTs #-}`],
       moduleName: module,
@@ -134,13 +148,28 @@ function writeDeviceFiles(config: Config): string[] {
       content: [],
     };
 
+    const groupedProps: Partial<Record<string, GenericProp[]>> = Object.groupBy(
+      getExposedProps(definition.exposes),
+      (prop: GenericProp) => prop.property
+    );
+
+    function isNotEmpty<Type>(a: [string, Type[] | undefined]): a is [string, [Type, ...Type[]]] {
+      return a[1] !== undefined && a[1].length !== 0;
+    }
+
+    const constructors = Object
+      .entries(groupedProps)
+      .filter(isNotEmpty)
+      .map(([key, props]) => ({
+        name: toConstructorOrTypeName("Prop " + key),
+        type: propsToType(hsFile, "", ...props)
+
+      }))
+
     hsFile.content.push({
       type: "gadt",
-      name: "Prop",
-      constructors: props.map((prop) => ({
-        name: propToConstructorName(prop),
-        type: propToType(prop, hsFile),
-      })),
+      name: toConstructorOrTypeName("Prop"),
+      constructors
     });
 
     fs.mkdirSync(path.dirname(definitionPath), { recursive: true });
@@ -153,6 +182,7 @@ function writeDeviceFiles(config: Config): string[] {
 function writePackageYaml(config: Config, exposedModules: string[]): void {
   const yamlStr = fs.readFileSync(config.packageYamlPath, { encoding: "utf-8" });
   const packageYaml = yaml.parse(yamlStr);
+  exposedModules = [...new Set(exposedModules)]
   packageYaml.library["exposed-modules"].splice(0, 0, ...exposedModules);
   fs.writeFileSync(`${config.outputPath}/package.yaml`, yaml.stringify(packageYaml));
 }

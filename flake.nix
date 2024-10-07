@@ -16,6 +16,7 @@
 
       packages = forAllSystems (pkgs: rec {
         default = zigbee2mqtt-types-source;
+
         zigbee2mqtt-types-source =
           let
             packageYaml = builtins.path { path = ./package.yaml; };
@@ -25,6 +26,7 @@
             pname = "zigbee2mqtt-types-source";
             version = "0.0.1";
             src = ./generator;
+            nodejs = pkgs.nodejs_22;
             npmDepsHash = "sha256-XFECsHO2pfjxGLv+iAluKCRwIFRFZovqmuB5tJ3V3z4=";
             installPhase = ''
               mkdir -p $out
@@ -34,6 +36,12 @@
               cp -r ${hsSrc}/* $out/src
             '';
           };
+
+        lib = pkgs.haskellPackages.callCabal2nix "zigbee2mqtt-types" zigbee2mqtt-types-source {
+          # Dependency overrides go here
+        };
+
+
       });
     };
 }

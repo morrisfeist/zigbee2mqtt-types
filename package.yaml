@@ -12,6 +12,7 @@ ghc-options: -Wall
 
 dependencies:
   - base >= 4.18
+  - text >= 2.0 && < 3.0
 
 library:
   source-dirs:
